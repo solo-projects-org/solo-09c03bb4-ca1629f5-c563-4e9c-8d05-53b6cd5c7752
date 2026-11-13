@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS collection_job (
     attempts        INTEGER NOT NULL DEFAULT 0,
     last_error      TEXT,
     claimed_by      TEXT,
+    -- 认领纪元（fencing token）：每次被认领 +1，迟到回写必须带回认领时的值
+    claim_epoch     INTEGER NOT NULL DEFAULT 0,
+    -- 运行心跳：由认领进程周期性刷新，据此区分“正常等慢报告”与“进程失联”
+    heartbeat_at    REAL,
     created_at      REAL NOT NULL,
     updated_at      REAL NOT NULL
 );
@@ -118,13 +122,28 @@ def init_db() -> None:
                ON CONFLICT(account_id) DO NOTHING""",
             (config.ACCOUNT_ID,),
         )
-        # 上次进程被杀死时可能残留 running 任务，启动时回收为 pending
-        conn.execute(
-            "UPDATE collection_job SET status='pending', claimed_by=NULL "
-            "WHERE status='running'"
-        )
+        _migrate_collection_job(conn, now)
     finally:
         conn.close()
+
+
+def _migrate_collection_job(conn: sqlite3.Connection, now: float) -> None:
+    """兼容旧数据卷：补齐认领纪元与心跳列，不改变任何任务状态。
+
+    - 旧库没有 claim_epoch / heartbeat_at 列，这里幂等补齐；
+    - 旧库遗留的 running 任务没有心跳，回填为 updated_at，
+      之后仅按正常的“心跳超时”规则被接管，而不是在启动/刷页面时被无条件重置；
+    - 新列存在时直接跳过，任何状态都不在本函数里改写。
+    """
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(collection_job)")}
+    if "claim_epoch" not in cols:
+        conn.execute("ALTER TABLE collection_job ADD COLUMN claim_epoch INTEGER NOT NULL DEFAULT 0")
+    if "heartbeat_at" not in cols:
+        conn.execute("ALTER TABLE collection_job ADD COLUMN heartbeat_at REAL")
+        conn.execute(
+            "UPDATE collection_job SET heartbeat_at=updated_at "
+            "WHERE status='running' AND heartbeat_at IS NULL"
+        )
 
 
 def _insert_event(conn: sqlite3.Connection, actor: str, kind: str, detail: str) -> None:

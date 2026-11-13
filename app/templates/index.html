@@ -54,7 +54,16 @@
   <div class="sub">FastAPI + SQLite ｜ 两个独立采集进程共用一个 OAuth2 账户 ｜ 刷新令牌轮换 · 单飞刷新 · 迟到 401 防护 · 刷新中断熔断</div>
 </header>
 <main>
-  {% if request.query_params.get('msg') %}<div class="full msg">操作完成：{{ request.query_params.get('msg') }}（页面每 2 秒自动刷新）</div>{% endif %}
+  {% if request.query_params.get('msg') %}
+  {% set msg_map = {
+    'queued': '报告号已入队，等待采集',
+    'requeued': '失败任务已重新排队',
+    'already_done': '该报告已采集完成，未重复派发',
+    'already_running': '任务正在采集中，未重复派发、尝试次数不变',
+    'already_pending': '任务已在队列中，未重复入队、尝试次数不变',
+    'empty_report': '报告号不能为空'
+  } %}
+  <div class="full msg">操作完成：{{ msg_map.get(request.query_params.get('msg'), request.query_params.get('msg')) }}（页面每 2 秒自动刷新）</div>{% endif %}
 
   <!-- 账户与令牌 -->
   <section class="card">
@@ -142,8 +151,9 @@
       <input type="text" name="report_no" placeholder="报告号，如 GR-2026-0001（可多次提交，逗号/空格分隔请逐个提交）" required>
       <button type="submit">提交采集</button>
     </form>
-    <div class="hint">模拟源内置报告号：<code>GR-2026-0001</code> ~ <code>GR-2026-0025</code>、<code>GR-DEMO-SLOW</code>、<code>GR-DEMO-401</code>。
-      凭据与结果均保存在数据卷 <code>/data/qc.db</code>；结果保存失败时任务不会标记成功。</div>
+    <div class="hint">模拟源内置报告号：<code>GR-2026-0001</code> ~ <code>GR-2026-0025</code>、<code>GR-DEMO-SLOW</code>、<code>GR-DEMO-401</code>、<code>GR-DEMO-PAUSE</code>。
+      凭据与结果均保存在数据卷 <code>/data/qc.db</code>；结果保存失败时任务不会标记成功。
+      任务执行中刷新页面或重复提交不会重新派发；进程退出后未完成任务由另一进程自动接管。</div>
     <table>
       <thead><tr><th>#</th><th>报告号</th><th>状态</th><th>尝试</th><th>认领者</th><th>样本号</th><th>应测粒数</th><th>发芽粒数</th><th>最后错误</th></tr></thead>
       <tbody id="jobs">

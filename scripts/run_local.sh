@@ -9,6 +9,9 @@ export MOCK_BASE_URL="http://127.0.0.1:9000"
 export WEB_PUBLIC_BASE_URL="http://127.0.0.1:8080"
 export MOCK_HOST="127.0.0.1" MOCK_PORT="9000" QC_HOST="127.0.0.1" QC_PORT="8080"
 export REFRESH_LEASE_SECONDS="${REFRESH_LEASE_SECONDS:-15}"
+# 任务心跳/失联接管：心跳周期内等待慢报告不会被误判，超过失联阈值才由其它进程接管
+export JOB_STALE_SECONDS="${JOB_STALE_SECONDS:-60}"
+export JOB_HEARTBEAT_SECONDS="${JOB_HEARTBEAT_SECONDS:-2}"
 
 PIDS=()
 cleanup() {

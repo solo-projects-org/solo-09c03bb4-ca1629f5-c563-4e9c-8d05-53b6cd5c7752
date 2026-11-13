@@ -115,6 +115,7 @@ async def submit_job(report_no: str = Form(...)):
     if not report_no:
         return RedirectResponse("/?msg=empty_report", status_code=303)
     outcome = await run_db(collector.enqueue_job, report_no)
+    # running/pending 的重复提交不会重新派发，也不会重置尝试次数
     await run_db(db.log_event, "web", "job_submit",
                              f"报告号 {report_no} 入队（{outcome}）")
     return RedirectResponse(f"/?msg={outcome}", status_code=303)

@@ -69,6 +69,8 @@ for i in range(6, 26):
 # 演示专用报告号
 REPORTS["GR-DEMO-SLOW"] = {"sample_no": "S-SLOW1", "expected_seeds": 400, "germinated_seeds": 365}
 REPORTS["GR-DEMO-401"] = {"sample_no": "S-401X1", "expected_seeds": 400, "germinated_seeds": 350}
+# 暂停/接管演示专用（配合慢报告延迟，验证冻结恢复后的迟到回写被 fencing 丢弃）
+REPORTS["GR-DEMO-PAUSE"] = {"sample_no": "S-PAUSE1", "expected_seeds": 400, "germinated_seeds": 341}
 
 
 def _issue_access(epoch: int) -> Dict[str, str]:

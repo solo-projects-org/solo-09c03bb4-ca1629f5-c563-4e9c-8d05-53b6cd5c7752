@@ -41,7 +41,9 @@ TOKEN_EXPIRY_MARGIN = _int("TOKEN_EXPIRY_MARGIN", 5)
 WORKER_NAME = os.environ.get("WORKER_NAME", "worker")
 WORKER_SLOTS = _int("WORKER_SLOTS", 2)
 JOB_MAX_ATTEMPTS = _int("JOB_MAX_ATTEMPTS", 5)
-# running 任务超过该秒数未更新，视为采集进程崩溃遗留并回收为 pending
+# running 任务超过该秒数没有心跳，视为采集进程崩溃/被冻结，由其它进程接管
 JOB_STALE_SECONDS = _int("JOB_STALE_SECONDS", 60)
+# 心跳间隔：运行中的任务周期性刷新 heartbeat_at，正常等待慢报告不会被误判失联
+JOB_HEARTBEAT_SECONDS = _int("JOB_HEARTBEAT_SECONDS", 2)
 # 采集请求超时（慢报告 demo 用）
 HTTP_TIMEOUT = float(os.environ.get("HTTP_TIMEOUT", "30"))
