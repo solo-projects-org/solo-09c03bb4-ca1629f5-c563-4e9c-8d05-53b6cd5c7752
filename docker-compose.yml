@@ -1,0 +1,64 @@
+services:
+  # 本地检测机构模拟源（OAuth2 授权服务器 + 发芽试验报告 API）
+  mock-lab:
+    build: .
+    command: ["mock"]
+    environment:
+      MOCK_HOST: 0.0.0.0
+      MOCK_PORT: "9000"
+      MOCK_ACCESS_TTL: "20"
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 质控库网页 / API（提交报告号、查看结果、重新授权、演示控制）
+  web:
+    build: .
+    command: ["web"]
+    environment:
+      QC_HOST: 0.0.0.0
+      QC_PORT: "8080"
+      QC_DB_PATH: /data/qc.db
+      MOCK_BASE_URL: http://mock-lab:9000
+      WEB_PUBLIC_BASE_URL: http://localhost:8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - qc-data:/data
+    depends_on:
+      mock-lab:
+        condition: service_healthy
+
+  # 两个独立采集进程，共用同一 OAuth2 账户、同一个数据卷
+  collector-a:
+    build: .
+    command: ["worker", "A"]
+    environment:
+      QC_DB_PATH: /data/qc.db
+      MOCK_BASE_URL: http://mock-lab:9000
+      WORKER_NAME: collector-a
+      WORKER_SLOTS: "2"
+    volumes:
+      - qc-data:/data
+    depends_on:
+      - web
+
+  collector-b:
+    build: .
+    command: ["worker", "B"]
+    environment:
+      QC_DB_PATH: /data/qc.db
+      MOCK_BASE_URL: http://mock-lab:9000
+      WORKER_NAME: collector-b
+      WORKER_SLOTS: "2"
+    volumes:
+      - qc-data:/data
+    depends_on:
+      - web
+
+volumes:
+  qc-data:

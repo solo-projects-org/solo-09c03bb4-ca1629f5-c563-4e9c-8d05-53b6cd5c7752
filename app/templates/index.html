@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>种子发芽试验质控采集库</title>
+<style>
+  :root { --ok:#1a7f37; --warn:#b26a00; --err:#c0392b; --line:#d8dee4; --bg:#f6f8fa; }
+  * { box-sizing: border-box; }
+  body { font-family: "PingFang SC","Microsoft YaHei",system-ui,sans-serif; margin:0; background:var(--bg); color:#1f2328; }
+  header { background:#0b3d2e; color:#fff; padding:14px 24px; }
+  header h1 { margin:0; font-size:19px; }
+  header .sub { font-size:12px; opacity:.8; margin-top:3px; }
+  main { max-width:1180px; margin:18px auto; padding:0 16px; display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+  .card h2 { font-size:15px; margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  .full { grid-column: 1 / -1; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid #eceff3; vertical-align:top; }
+  th { color:#57606a; font-weight:600; background:#fafbfc; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; }
+  .pill.active { background:#dafbe1; color:var(--ok); }
+  .pill.paused { background:#ffebe9; color:var(--err); }
+  .pill.done { background:#dafbe1; color:var(--ok); }
+  .pill.pending { background:#fff8c5; color:var(--warn); }
+  .pill.running { background:#ddf4ff; color:#0969da; }
+  .pill.failed { background:#ffebe9; color:var(--err); }
+  form.inline { display:inline; }
+  input[type=text],input[type=number],select { padding:7px 9px; border:1px solid var(--line); border-radius:6px; font-size:13px; width:100%; }
+  .row { display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; align-items:center; }
+  .row > * { flex:1; min-width:120px; }
+  button { padding:7px 14px; border:0; border-radius:6px; background:#0b3d2e; color:#fff; font-size:13px; cursor:pointer; white-space:nowrap; }
+  button.secondary { background:#57606a; }
+  button.warn { background:#b26a00; }
+  button.danger { background:var(--err); }
+  button:hover { opacity:.88; }
+  .kv { display:grid; grid-template-columns:130px 1fr; gap:6px 10px; font-size:13px; }
+  .kv .k { color:#57606a; }
+  code { background:#eff1f3; padding:1px 5px; border-radius:4px; font-size:12px; }
+  .reason { color:var(--err); font-weight:600; }
+  .events { max-height:340px; overflow:auto; font-size:12px; }
+  .events td { font-family:ui-monospace,Menlo,monospace; }
+  .hint { font-size:12px; color:#57606a; margin:6px 0 10px; line-height:1.6; }
+  .msg { background:#ddf4ff; border:1px solid #0969da33; padding:8px 12px; border-radius:6px; font-size:13px; margin-bottom:12px; }
+  .demo-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .demo-box { border:1px dashed var(--line); border-radius:8px; padding:10px 12px; }
+  .demo-box h3 { margin:0 0 8px; font-size:13px; }
+  .muted { color:#8c959f; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌱 种子发芽试验 · 质控采集库</h1>
+  <div class="sub">FastAPI + SQLite ｜ 两个独立采集进程共用一个 OAuth2 账户 ｜ 刷新令牌轮换 · 单飞刷新 · 迟到 401 防护 · 刷新中断熔断</div>
+</header>
+<main>
+  {% if request.query_params.get('msg') %}<div class="full msg">操作完成：{{ request.query_params.get('msg') }}（页面每 2 秒自动刷新）</div>{% endif %}
+
+  <!-- 账户与令牌 -->
+  <section class="card">
+    <h2>① OAuth2 账户与令牌状态</h2>
+    <div class="kv">
+      <div class="k">账户</div><div><code>{{ acct.status and 'shared-lab-account' }}</code></div>
+      <div class="k">状态</div><div>
+        {% if acct.status == 'active' %}<span class="pill active">采集中 active</span>
+        {% else %}<span class="pill paused">已暂停 paused</span>{% endif %}
+      </div>
+      {% if acct.pause_reason %}<div class="k">暂停原因</div><div class="reason">{{ acct.pause_reason }}</div>{% endif %}
+      <div class="k">当前访问令牌</div><div>jti=<code>{{ acct.access_jti or '—' }}</code>
+        {% if acct.expires_in is not none %}（剩余 <b id="ttl">{{ acct.expires_in }}</b> 秒）{% endif %}</div>
+      <div class="k">刷新令牌</div><div><code>{{ acct.refresh_token_masked or '—' }}</code>（每次刷新轮换，旧令牌立即作废）</div>
+      <div class="k">授权纪元</div><div>auth_epoch=<b>{{ acct.auth_epoch }}</b>（重新授权 +1，迟到刷新结果按纪元丢弃）</div>
+      <div class="k">刷新协调</div><div>
+        <span class="pill {{ 'running' if acct.refresh_state == 'in_progress' else 'done' }}">{{ acct.refresh_state }}</span>
+        {% if acct.refresh_claimer %}认领者 <code>{{ acct.refresh_claimer }}</code>{% endif %}
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <form class="inline" method="post" action="/auth/start"><button type="submit">🔑 发起授权 / 重新授权</button></form>
+    </div>
+    <div class="hint">等待刷新期间仍可随时重新授权；新授权会解除进行中的刷新，迟到的刷新结果不得覆盖新授权。</div>
+  </section>
+
+  <!-- 演示控制 -->
+  <section class="card">
+    <h2>② 演示控制台（代理到本地模拟检测机构）</h2>
+    <div class="demo-grid">
+      <div class="demo-box">
+        <h3>令牌短期有效 / 轮换</h3>
+        <form method="post" action="/demo/ttl">
+          <div class="row"><input type="number" name="ttl" value="{{ control.access_ttl or 20 }}" min="1" style="flex:2">
+          <button type="submit">设置访问令牌寿命(秒)</button></div>
+        </form>
+        <div class="muted">设为 5~8 秒后再提交多个报告号，可在事件日志观察多个进程只刷新一次。</div>
+      </div>
+      <div class="demo-box">
+        <h3>迟到 401（不废新令牌）</h3>
+        <form method="post" action="/demo/stale401" class="row">
+          <input type="text" name="report_no" value="GR-DEMO-401" style="flex:2">
+          <button type="submit" class="warn">注入401</button>
+          <button type="submit" name="clear" value="1" class="secondary">清除</button>
+        </form>
+        <div class="muted">该报告号请求会收到带旧 jti 的 401，系统识别为迟到 401 后直接重试、不刷新。</div>
+      </div>
+      <div class="demo-box">
+        <h3>慢报告（进程互不阻塞）</h3>
+        <form method="post" action="/demo/slow">
+          <div class="row">
+            <input type="text" name="report_no" value="GR-DEMO-SLOW" style="flex:2">
+            <input type="number" name="delay" value="6" step="0.5" style="flex:1">
+            <button type="submit" class="warn">设为慢报告</button>
+            <button type="submit" name="clear" value="1" class="secondary">清除</button>
+          </div>
+        </form>
+        <div class="muted">一个进程等慢报告时，另一个进程与其它槽位照常取数。</div>
+      </div>
+      <div class="demo-box">
+        <h3>刷新故障 / 刷新中断</h3>
+        <form method="post" action="/demo/refresh-fail">
+          <div class="row">
+            <select name="mode" style="flex:2">
+              <option value="">关闭故障</option>
+              <option value="ambiguous">ambiguous：刷新连接中断（结果无法确认）</option>
+              <option value="fast">fast：确定失败 invalid_grant</option>
+            </select>
+            <button type="submit" class="danger">应用</button>
+          </div>
+          <div class="row">
+            <input type="number" name="hang" value="0" step="0.5" style="flex:2" placeholder="挂起秒数（配合 ambiguous 模拟超时）">
+            <button type="submit" class="danger">挂起后断开</button>
+          </div>
+        </form>
+        <div class="muted">触发后账户自动暂停并提示重新授权；也可用 <code>docker kill -s KILL collector-a</code> 演示刷新进程中途退出（租约超时熔断）。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 提交报告号 -->
+  <section class="card full">
+    <h2>③ 提交报告号（授权后采集样本号、应测粒数、发芽粒数）</h2>
+    <form method="post" action="/jobs" class="row" style="max-width:560px">
+      <input type="text" name="report_no" placeholder="报告号，如 GR-2026-0001（可多次提交，逗号/空格分隔请逐个提交）" required>
+      <button type="submit">提交采集</button>
+    </form>
+    <div class="hint">模拟源内置报告号：<code>GR-2026-0001</code> ~ <code>GR-2026-0025</code>、<code>GR-DEMO-SLOW</code>、<code>GR-DEMO-401</code>。
+      凭据与结果均保存在数据卷 <code>/data/qc.db</code>；结果保存失败时任务不会标记成功。</div>
+    <table>
+      <thead><tr><th>#</th><th>报告号</th><th>状态</th><th>尝试</th><th>认领者</th><th>样本号</th><th>应测粒数</th><th>发芽粒数</th><th>最后错误</th></tr></thead>
+      <tbody id="jobs">
+      {% for j in jobs %}
+        <tr><td>{{ j.id }}</td><td><code>{{ j.report_no }}</code></td>
+        <td><span class="pill {{ j.status }}">{{ j.status }}</span></td>
+        <td>{{ j.attempts }}</td><td>{{ j.claimed_by or '—' }}</td>
+        <td>{{ j.sample_no or '—' }}</td><td>{{ j.expected_seeds if j.expected_seeds is not none else '—' }}</td>
+        <td>{{ j.germinated_seeds if j.germinated_seeds is not none else '—' }}</td>
+        <td class="muted">{{ j.last_error or '' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 结果 -->
+  <section class="card">
+    <h2>④ 质控库结果（按报告号查看）</h2>
+    <table>
+      <thead><tr><th>报告号</th><th>样本号</th><th>应测粒数</th><th>发芽粒数</th><th>采集者</th></tr></thead>
+      <tbody id="results">
+      {% for r in results %}
+        <tr><td><code>{{ r.report_no }}</code></td><td>{{ r.sample_no }}</td>
+        <td>{{ r.expected_seeds }}</td><td>{{ r.germinated_seeds }}</td><td class="muted">{{ r.collected_by }}</td></tr>
+      {% else %}<tr><td colspan="5" class="muted">暂无结果，先授权并提交报告号。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 事件日志 -->
+  <section class="card">
+    <h2>⑤ 协调事件日志（刷新轮换 / 等待 / 迟到401 / 暂停）</h2>
+    <div class="events">
+    <table>
+      <thead><tr><th>时间</th><th>参与者</th><th>事件</th><th>详情</th></tr></thead>
+      <tbody id="events">
+      {% for e in events %}
+        <tr><td class="muted">{{ e.ts | round(1) }}</td><td>{{ e.actor }}</td><td><code>{{ e.kind }}</code></td><td>{{ e.detail }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+</main>
+<script>
+// 轻量轮询：只更新 TTL 倒计时，整页数据每 2 秒静默刷新表格区
+let lastTtl = {{ acct.expires_in if acct.expires_in is not none else 'null' }};
+setInterval(() => { const el = document.getElementById('ttl'); if (el && lastTtl !== null) { lastTtl = Math.max(0, lastTtl - 1); el.textContent = lastTtl.toFixed(0); } }, 1000);
+setInterval(async () => {
+  try {
+    const s = await (await fetch('/api/state')).json();
+    lastTtl = s.account.expires_in;
+    const ttlEl = document.getElementById('ttl');
+    if (ttlEl) ttlEl.textContent = (s.account.expires_in ?? 0).toFixed(0);
+    const jb = document.getElementById('jobs');
+    jb.innerHTML = s.jobs.map(j => `<tr><td>${j.id}</td><td><code>${j.report_no}</code></td>
+      <td><span class="pill ${j.status}">${j.status}</span></td><td>${j.attempts}</td>
+      <td>${j.claimed_by || '—'}</td><td>${j.sample_no || '—'}</td>
+      <td>${j.expected_seeds ?? '—'}</td><td>${j.germinated_seeds ?? '—'}</td>
+      <td class="muted">${j.last_error || ''}</td></tr>`).join('');
+    document.getElementById('results').innerHTML = s.results.length
+      ? s.results.map(r => `<tr><td><code>${r.report_no}</code></td><td>${r.sample_no}</td>
+        <td>${r.expected_seeds}</td><td>${r.germinated_seeds}</td><td class="muted">${r.collected_by}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">暂无结果</td></tr>';
+    document.getElementById('events').innerHTML = s.events.map(e =>
+      `<tr><td class="muted">${e.ts.toFixed(1)}</td><td>${e.actor}</td><td><code>${e.kind}</code></td><td>${e.detail || ''}</td></tr>`).join('');
+  } catch (e) { /* 页面刷新期间忽略 */ }
+}, 2000);
+</script>
+</body>
+</html>
